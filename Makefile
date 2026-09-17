@@ -16,7 +16,7 @@ DYLIB = $(BUILD_DIR)/yunooos-debug.dylib
 
 ifeq ($(DEBUG_UI),1)
 OBJECTS += $(DEBUG_UI_OBJECTS)
-LINK_FRAMEWORKS += -framework UIKit -framework QuartzCore
+LINK_FRAMEWORKS += -framework UIKit -framework QuartzCore -framework CoreGraphics
 endif
 
 .PHONY: check dylib clean
