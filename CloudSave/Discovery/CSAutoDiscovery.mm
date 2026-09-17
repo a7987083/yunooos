@@ -82,6 +82,7 @@ static const NSInteger CSObserveThreshold = 40;
     NSMutableDictionary<NSString *, CSDiscoveryCandidate *> *candidateMap = [NSMutableDictionary dictionary];
 
     [current enumerateKeysAndObjectsUsingBlock:^(NSString *path, CSFileObservation *now, BOOL *stop) {
+        (void)stop;
         CSFileObservation *before = baseline[path];
         BOOL isNew = before == nil;
         BOOL metadataChanged = isNew || before.size != now.size || before.modifiedUnixMs != now.modifiedUnixMs;
@@ -91,8 +92,6 @@ static const NSInteger CSObserveThreshold = 40;
         candidateMap[path] = candidate;
     }];
 
-    // Files that change together in one directory are more likely to belong to
-    // the same save transaction. Give a small correlation boost.
     NSMutableDictionary<NSString *, NSMutableArray<CSDiscoveryCandidate *> *> *byParent = [NSMutableDictionary dictionary];
     for (CSDiscoveryCandidate *candidate in candidateMap.allValues) {
         NSString *parent = candidate.observation.relativePath.stringByDeletingLastPathComponent;
@@ -100,6 +99,8 @@ static const NSInteger CSObserveThreshold = 40;
         [byParent[parent] addObject:candidate];
     }
     [byParent enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSMutableArray<CSDiscoveryCandidate *> *group, BOOL *stop) {
+        (void)key;
+        (void)stop;
         if (group.count < 2) return;
         for (CSDiscoveryCandidate *candidate in group) {
             candidate.score += 10;
@@ -107,8 +108,6 @@ static const NSInteger CSObserveThreshold = 40;
         }
     }];
 
-    // SQLite is a file family, not a single file. If one member changes, include
-    // the main DB and any WAL/SHM/journal companions that exist in the sandbox.
     NSArray<CSDiscoveryCandidate *> *seedCandidates = candidateMap.allValues.copy;
     for (CSDiscoveryCandidate *candidate in seedCandidates) {
         NSString *family = candidate.sqliteFamilyKey;
@@ -126,9 +125,6 @@ static const NSInteger CSObserveThreshold = 40;
         }
     }
 
-    // Calculate content hashes only for plausible save candidates. This keeps
-    // the baseline scan fast on asset-heavy games while still giving us a
-    // content identity for files that may enter a generated profile.
     for (CSDiscoveryCandidate *candidate in candidateMap.allValues) {
         if (candidate.score < CSObserveThreshold) continue;
         NSString *absolute = [self.homeDirectory stringByAppendingPathComponent:candidate.observation.relativePath];
@@ -164,8 +160,6 @@ static const NSInteger CSObserveThreshold = 40;
     profile.observedPaths = observed;
     profile.sqliteFamilies = families;
     if (included.count) {
-        // One change session should never be treated as absolute certainty.
-        // Repeated learning sessions will be added in v0.2.
         profile.confidence = MIN(0.89, (scoreTotal / (included.count * 100.0)) * 0.90);
     }
 
@@ -177,6 +171,7 @@ static const NSInteger CSObserveThreshold = 40;
 }
 
 - (NSDictionary<NSString *, CSFileObservation *> *)scanSandboxWithError:(NSError **)error {
+    (void)error;
     NSFileManager *fm = NSFileManager.defaultManager;
     NSArray<NSString *> *roots = @[
         [self.homeDirectory stringByAppendingPathComponent:@"Documents"],
@@ -192,7 +187,9 @@ static const NSInteger CSObserveThreshold = 40;
                                               includingPropertiesForKeys:keys
                                                                  options:0
                                                             errorHandler:^BOOL(NSURL *url, NSError *scanError) {
-            return YES; // best-effort scan: inaccessible cache/vendor paths must not abort discovery
+            (void)url;
+            (void)scanError;
+            return YES;
         }];
         for (NSURL *url in enumerator) {
             NSString *absolute = url.path.stringByStandardizingPath;
@@ -232,7 +229,9 @@ static const NSInteger CSObserveThreshold = 40;
         @"/library/saved application state/", @"/tmp/", @"/documents/zonoe/",
         @"/library/application support/yunooos/", @"/documents/yunooos/"
     ];
-    for (NSString *prefix in blocked) if ([lower hasPrefix:prefix] || [lower containsString:prefix]) return YES;
+    for (NSString *prefix in blocked) {
+        if ([lower hasPrefix:prefix] || [lower containsString:prefix]) return YES;
+    }
     return NO;
 }
 
@@ -241,7 +240,7 @@ static const NSInteger CSObserveThreshold = 40;
     NSString *lower = path.lowercaseString;
     NSString *name = path.lastPathComponent.lowercaseString;
     NSString *ext = path.pathExtension.lowercaseString;
-    NSInteger score = isNew ? 8 : 20;
+    __block NSInteger score = isNew ? 8 : 20;
     NSMutableArray<NSString *> *reasons = [NSMutableArray arrayWithObject:isNew ? @"new_file" : @"changed_file"];
 
     if ([lower hasPrefix:@"documents/"]) { score += 20; [reasons addObject:@"documents_location"]; }
@@ -260,7 +259,11 @@ static const NSInteger CSObserveThreshold = 40;
         @"world": @12, @"slot": @10, @"persistent": @12, @"userdata": @12, @"game": @5
     };
     [keywords enumerateKeysAndObjectsUsingBlock:^(NSString *keyword, NSNumber *weight, BOOL *stop) {
-        if ([lower containsString:keyword]) { score += weight.integerValue; [reasons addObject:[@"keyword:" stringByAppendingString:keyword]]; }
+        (void)stop;
+        if ([lower containsString:keyword]) {
+            score += weight.integerValue;
+            [reasons addObject:[@"keyword:" stringByAppendingString:keyword]];
+        }
     }];
 
     if (self.bundleIdentifier.length && [name containsString:self.bundleIdentifier.lowercaseString]) {
@@ -268,10 +271,12 @@ static const NSInteger CSObserveThreshold = 40;
         [reasons addObject:@"bundle_identifier_match"];
     }
     if ([lower containsString:@"cache"] || [lower containsString:@"temp"] || [lower containsString:@"temporary"]) {
-        score -= 45; [reasons addObject:@"cache_or_temp_penalty"];
+        score -= 45;
+        [reasons addObject:@"cache_or_temp_penalty"];
     }
     if ([ext isEqualToString:@"log"] || [ext isEqualToString:@"tmp"]) {
-        score -= 55; [reasons addObject:@"volatile_extension_penalty"];
+        score -= 55;
+        [reasons addObject:@"volatile_extension_penalty"];
     }
 
     NSString *family = [self sqliteFamilyKeyForPath:path];
@@ -305,7 +310,9 @@ static const NSInteger CSObserveThreshold = 40;
         [family stringByAppendingString:@"-wal"],
         [family stringByAppendingString:@"-shm"],
         [family stringByAppendingString:@"-journal"]
-    ]) if (current[path]) [members addObject:path];
+    ]) {
+        if (current[path]) [members addObject:path];
+    }
     return members;
 }
 
