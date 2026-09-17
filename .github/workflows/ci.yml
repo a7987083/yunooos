@@ -14,3 +14,16 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
       - name: Compile Objective-C/Objective-C++ core
         run: make check
+      - name: Build iOS arm64 dylib
+        run: make dylib
+      - name: Inspect Mach-O
+        run: |
+          file build/yunooos.dylib
+          xcrun vtool -show-build build/yunooos.dylib || true
+          shasum -a 256 build/yunooos.dylib
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: yunooos-autodiscovery-v0.1
+          path: build/yunooos.dylib
+          if-no-files-found: error
